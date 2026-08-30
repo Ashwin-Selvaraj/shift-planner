@@ -365,14 +365,19 @@ export function validateRoster(input: ValidationInput): ValidationResult {
     }
     for (const [week, weekDays] of weeks) {
       if (weekDays.length < 7) continue;
+      // Any non-working day satisfies the rule. The point of BRD 19 is that
+      // nobody works a full week without a break, so approved leave and a
+      // public holiday count alongside a rostered off — demanding an extra
+      // "off" from someone who was on leave all week is nonsense, and it is
+      // also the reading the roster engine uses when it places offs.
       const offs = weekDays.filter((d) => {
         const type = byDate.get(d)?.type;
-        return type === 'OFF' || type === 'HOLIDAY';
+        return type === 'OFF' || type === 'HOLIDAY' || type === 'LEAVE';
       }).length;
       if (offs < policy.minWeeklyOffs) {
         push({
           code: 'MISSING_WEEKLY_OFF',
-          message: `${employee.name} has ${offs} weekly off(s) in week ${week}. At least ${policy.minWeeklyOffs} is required.`,
+          message: `${employee.name} has no rest day in week ${week}. At least ${policy.minWeeklyOffs} non-working day is required.`,
           date: weekDays[0],
           employeeId: employee.id,
           employeeName: employee.name,

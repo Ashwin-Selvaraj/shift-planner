@@ -1,0 +1,268 @@
+// Shift Planner data model.
+//
+// SQLite is the default so the project runs end to end with no external
+// services. The schema avoids SQLite-only constructs, so switching the
+// provider to postgresql and re-running the migration is the only change
+// required for a production deployment.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Sign-in identity. Kept separate from Employee because administrators and
+/// managers may exist without being part of a rostered team, and employees may
+/// exist in the master long before they are given a login.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  employee      Employee?
+  auditLogs     AuditLog[]
+  notifications Notification[]
+
+  @@index([role])
+}
+
+model Location {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  createdAt DateTime @default(now())
+
+  employees Employee[]
+  holidays  Holiday[]
+}
+
+model Team {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  businessUnit String?
+  managerId    String?
+  createdAt    DateTime @default(now())
+
+  manager   Employee?  @relation("TeamManager", fields: [managerId], references: [id])
+  employees Employee[] @relation("TeamMembers")
+  rosters   Roster[]
+}
+
+/// Employee master (BRD section 7).
+model Employee {
+  id               String   @id @default(cuid())
+  employeeId       String   @unique
+  name             String
+  email            String   @unique
+  role             String
+  teamId           String
+  managerId        String?
+  teamLeadId       String?
+  shiftLeadId      String?
+  locationId       String?
+  isCoreResource   Boolean  @default(false)
+  skillCategory    String?
+  shiftPreference  String?
+  employmentStatus String   @default("ACTIVE")
+  userId           String?  @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  team      Team      @relation("TeamMembers", fields: [teamId], references: [id])
+  location  Location? @relation(fields: [locationId], references: [id])
+  user      User?     @relation(fields: [userId], references: [id])
+  manager   Employee? @relation("ManagerOf", fields: [managerId], references: [id])
+  teamLead  Employee? @relation("TeamLeadOf", fields: [teamLeadId], references: [id])
+  shiftLead Employee? @relation("ShiftLeadOf", fields: [shiftLeadId], references: [id])
+
+  managedEmployees   Employee[] @relation("ManagerOf")
+  teamLedEmployees   Employee[] @relation("TeamLeadOf")
+  shiftLedEmployees  Employee[] @relation("ShiftLeadOf")
+  managedTeams       Team[]     @relation("TeamManager")
+
+  assignments      Assignment[]
+  leaves           Leave[]      @relation("LeaveOwner")
+  replacementFor   Leave[]      @relation("LeaveReplacement")
+  compensations    HolidayCompensation[]
+
+  @@index([teamId])
+  @@index([locationId])
+  @@index([role])
+  @@index([employmentStatus])
+}
+
+/// Shift definition and capacity plan (BRD sections 9 and 10).
+/// Times are minutes from midnight; endMinutes <= startMinutes means the shift
+/// crosses midnight.
+model Shift {
+  id                   String   @id @default(cuid())
+  code                 String   @unique
+  name                 String
+  startMinutes         Int
+  endMinutes           Int
+  minStaff             Int      @default(1)
+  maxStaff             Int      @default(10)
+  shiftLeadsRequired   Int      @default(1)
+  coreResourcesRequired Int     @default(1)
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  assignments Assignment[]
+}
+
+/// A month of planning for one team (BRD section 12).
+model Roster {
+  id          String   @id @default(cuid())
+  teamId      String
+  year        Int
+  month       Int
+  startDate   String
+  endDate     String
+  status      String   @default("DRAFT")
+  publishedAt DateTime?
+  publishedBy String?
+  approvedAt  DateTime?
+  approvedBy  String?
+  /// Cached result of the last validation run, so the dashboard does not have
+  /// to re-derive it on every page load.
+  validationJson String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team        Team         @relation(fields: [teamId], references: [id])
+  assignments Assignment[]
+
+  @@unique([teamId, year, month])
+  @@index([status])
+}
+
+/// One employee, one day (BRD section 15 permits exactly one).
+model Assignment {
+  id             String   @id @default(cuid())
+  rosterId       String
+  employeeId     String
+  date           String
+  type           String
+  shiftId        String?
+  /// Set when a manager knowingly accepts a restricted transition (BRD 17).
+  overrideReason String?
+  overrideBy     String?
+  /// Manual edits survive regeneration.
+  locked         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  roster   Roster   @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  shift    Shift?   @relation(fields: [shiftId], references: [id])
+
+  @@unique([rosterId, employeeId, date])
+  @@index([date])
+  @@index([employeeId, date])
+  @@index([shiftId, date])
+}
+
+/// Planned and emergency leave (BRD section 21).
+model Leave {
+  id            String   @id @default(cuid())
+  employeeId    String
+  startDate     String
+  endDate       String
+  kind          String   @default("PLANNED")
+  status        String   @default("PENDING")
+  reason        String?
+  replacementId String?
+  decidedBy     String?
+  decidedAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  employee    Employee  @relation("LeaveOwner", fields: [employeeId], references: [id], onDelete: Cascade)
+  replacement Employee? @relation("LeaveReplacement", fields: [replacementId], references: [id])
+
+  @@index([employeeId])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+/// Location-specific holiday calendars (BRD section 22).
+model Holiday {
+  id         String   @id @default(cuid())
+  locationId String
+  date       String
+  name       String
+  createdAt  DateTime @default(now())
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, date])
+  @@index([date])
+}
+
+/// Comp-off or double pay for a holiday worked — exactly one (BRD section 23).
+model HolidayCompensation {
+  id         String   @id @default(cuid())
+  employeeId String
+  date       String
+  choice     String
+  createdAt  DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date])
+}
+
+/// Notifications (BRD section 26). Delivery channels beyond in-app are handled
+/// by adapters in src/services/notifications.ts.
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+}
+
+/// Audit trail (BRD section 28). Every mutation records who, when, what changed
+/// and why. Retained for seven years per BRD section 32.
+model AuditLog {
+  id            String   @id @default(cuid())
+  userId        String?
+  userName      String
+  action        String
+  entity        String
+  entityId      String?
+  previousValue String?
+  updatedValue  String?
+  reason        String?
+  createdAt     DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+/// Tunable policy (BRD sections 16-20) stored as a single row so administrators
+/// can change the wellness rules without a redeploy.
+model PolicySetting {
+  id        String   @id @default("default")
+  json      String
+  updatedAt DateTime @updatedAt
+}

@@ -347,3 +347,47 @@ describe('warnings allow publication (BRD 25)', () => {
     expect(codes(result)).not.toContain('MISSING_WEEKLY_OFF');
   });
 });
+
+describe('rest days (BRD 19)', () => {
+  it('accepts approved leave as the weekly rest day', () => {
+    // The roster engine places no extra off for someone who is already on leave
+    // that week; the validator must agree, or a perfectly legal roster is
+    // permanently unpublishable.
+    const employees = compliantWeek().employees;
+    const assignments = compliantWeek().assignments.map((a) =>
+      a.employeeId === 'c1' && a.type === 'OFF'
+        ? { ...a, type: 'SHIFT' as const, shiftId: S1.id }
+        : a.employeeId === 'c1' && a.date === '2026-09-02'
+          ? { employeeId: 'c1', date: '2026-09-02', type: 'LEAVE' as const }
+          : a,
+    );
+    const result = validateRoster({
+      startDate: WEEK_START,
+      endDate: WEEK_END,
+      employees,
+      shifts: S1_ONLY,
+      assignments,
+      leaves: [
+        {
+          id: 'lv',
+          employeeId: 'c1',
+          startDate: '2026-09-02',
+          endDate: '2026-09-02',
+          kind: 'PLANNED',
+          status: 'APPROVED',
+        },
+      ],
+    });
+    expect(codes(result)).not.toContain('MISSING_WEEKLY_OFF');
+  });
+
+  it('still reports a week with no rest day at all', () => {
+    const assignments = compliantWeek().assignments.map((a) =>
+      a.employeeId === 'c1' && a.type === 'OFF'
+        ? { ...a, type: 'SHIFT' as const, shiftId: S1.id }
+        : a,
+    );
+    const result = run({ assignments });
+    expect(codes(result)).toContain('MISSING_WEEKLY_OFF');
+  });
+});

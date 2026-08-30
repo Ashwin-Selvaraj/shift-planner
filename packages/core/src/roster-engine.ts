@@ -80,6 +80,14 @@ const WEIGHTS = {
    */
   fairness: 30,
   weekendRelief: 6,
+  /**
+   * Charged per day once an employee is already at the preferred run length.
+   * BRD 20 calls five consecutive days preferred and six an exception, so the
+   * engine has to actively rotate people out at five rather than simply staying
+   * inside the legal maximum. Set above the stability bonus so a long block
+   * loses to a rested colleague unless coverage leaves no alternative.
+   */
+  streakFatigue: 150,
 };
 
 interface WorkingState {
@@ -370,6 +378,10 @@ export function generateRoster(input: RosterGenerationInput): RosterGenerationRe
         value += WEIGHTS.matchesPreference;
       }
       value += (meanWorked - current.workedTotal) * WEIGHTS.fairness;
+      if (current.streak >= policy.preferredConsecutiveDays) {
+        value -=
+          WEIGHTS.streakFatigue * (current.streak - policy.preferredConsecutiveDays + 1);
+      }
       if (isWeekend(date) && current.workedTotal > 0) value -= WEIGHTS.weekendRelief;
       return value;
     };
