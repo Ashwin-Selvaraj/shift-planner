@@ -1,0 +1,28 @@
+{
+  "name": "shift-planner",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Shift Planner — workforce scheduling and resource planning system",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build -w @shift-planner/core && npm run build -w @shift-planner/api && npm run build -w @shift-planner/web",
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @shift-planner/api\" \"npm run dev -w @shift-planner/web\"",
+    "test": "npm run test -w @shift-planner/core",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run typecheck",
+    "db:migrate": "npm run db:migrate -w @shift-planner/api",
+    "db:seed": "npm run db:seed -w @shift-planner/api",
+    "db:reset": "npm run db:reset -w @shift-planner/api",
+    "setup": "npm install && npm run build -w @shift-planner/core && npm run db:migrate && npm run db:seed"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}
