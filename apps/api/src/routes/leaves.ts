@@ -1,7 +1,7 @@
 /** Leave management and the emergency-leave workflow (BRD section 21). */
 import { Router } from 'express';
 import { z } from 'zod';
-import { dateRange, suggestReplacements } from '@shift-planner/core';
+import { addDays, dateRange, suggestReplacements } from '@shift-planner/core';
 import { asyncHandler, badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { prisma } from '../lib/prisma.js';
 import { authenticate, requirePermission } from '../middleware/auth.js';
@@ -135,37 +135,48 @@ leaveRouter.get(
     });
     if (!leave) throw notFound('Leave request not found');
 
-    const [employees, shifts, assignments, leaves, policy] = await Promise.all([
-      prisma.employee.findMany({ where: { employmentStatus: 'ACTIVE' } }),
-      prisma.shift.findMany(),
-      prisma.assignment.findMany({
-        where: { date: { gte: leave.startDate, lte: leave.endDate } },
-      }),
-      prisma.leave.findMany({ where: { status: 'APPROVED' } }),
-      getPolicy(),
-    ]);
+    // The suggester looks back to judge work streaks and the previous day's
+    // shift, so context reaches back beyond the leave itself. Every query below
+    // is bounded to that window: loading the whole assignment table would mean
+    // hundreds of thousands of rows on a real workforce, for a request that
+    // only ever needs a fortnight of history.
+    const STREAK_LOOKBACK_DAYS = 14;
+    const contextFrom = addDays(leave.startDate, -STREAK_LOOKBACK_DAYS);
+
+    const [employees, shifts, ownAssignments, contextAssignments, leaves, policy] =
+      await Promise.all([
+        prisma.employee.findMany({ where: { employmentStatus: 'ACTIVE' } }),
+        prisma.shift.findMany(),
+        // The absent employee's own rostered days, to find what needs cover.
+        prisma.assignment.findMany({
+          where: {
+            employeeId: leave.employeeId,
+            type: 'SHIFT',
+            date: { gte: leave.startDate, lte: leave.endDate },
+          },
+        }),
+        // Everyone else's recent history, for streak and transition checks.
+        prisma.assignment.findMany({
+          where: { date: { gte: contextFrom, lte: leave.endDate } },
+        }),
+        // Only leave that overlaps the window can affect availability.
+        prisma.leave.findMany({
+          where: {
+            status: 'APPROVED',
+            startDate: { lte: leave.endDate },
+            endDate: { gte: contextFrom },
+          },
+        }),
+        getPolicy(),
+      ]);
 
     const shiftById = new Map(shifts.map((s) => [s.id, s]));
     const employeeRecords = employees.map(toEmployeeRecord);
     const shiftRecords = shifts.map(toShiftDefinition);
+    const contextRecords = contextAssignments.map(toAssignmentRecord);
+    const leaveRecords = leaves.map(toLeaveRecord);
 
-    // Only the days the employee is actually rostered onto a shift need cover.
-    const affected = assignments.filter(
-      (a) => a.employeeId === leave.employeeId && a.type === 'SHIFT' && a.shiftId,
-    );
-
-    const allAssignments = await prisma.assignment.findMany({
-      where: {
-        date: {
-          gte: dateRange(leave.startDate, leave.endDate)[0] ?? leave.startDate,
-          lte: leave.endDate,
-        },
-      },
-    });
-    // Widen the window so streak and transition checks see the surrounding days.
-    const contextAssignments = await prisma.assignment.findMany({
-      where: { employeeId: { in: employees.map((e) => e.id) } },
-    });
+    const affected = ownAssignments.filter((a) => a.shiftId);
 
     const days = affected.map((assignment) => {
       const shift = shiftById.get(assignment.shiftId!);
@@ -179,8 +190,8 @@ leaveRouter.get(
           absentEmployee: toEmployeeRecord(leave.employee),
           employees: employeeRecords,
           shifts: shiftRecords,
-          assignments: contextAssignments.map(toAssignmentRecord),
-          leaves: leaves.map(toLeaveRecord),
+          assignments: contextRecords,
+          leaves: leaveRecords,
           policy,
           limit: 8,
         }).map((suggestion) => ({
@@ -196,8 +207,6 @@ leaveRouter.get(
         })),
       };
     });
-
-    void allAssignments;
 
     res.json({
       leave: {
