@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-slate-100 text-slate-900 antialiased;
+  }
+
+  /* The roster grid is wide by nature; keep its scrollbars unobtrusive. */
+  .thin-scroll::-webkit-scrollbar {
+    height: 10px;
+    width: 10px;
+  }
+  .thin-scroll::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+  }
+  .thin-scroll::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm
+           font-medium transition focus:outline-none focus-visible:ring-2
+           focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-slate-900 text-white hover:bg-slate-800 focus-visible:ring-slate-900;
+  }
+  .btn-secondary {
+    @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50
+           focus-visible:ring-slate-400;
+  }
+  .btn-danger {
+    @apply btn bg-rose-600 text-white hover:bg-rose-500 focus-visible:ring-rose-600;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
+           text-slate-900 placeholder:text-slate-400 focus:border-slate-900
+           focus:outline-none focus:ring-1 focus:ring-slate-900;
+  }
+
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-slate-700;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+  }
+
+  .th {
+    @apply px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .td {
+    @apply px-3 py-2.5 text-sm text-slate-700;
+  }
+}
